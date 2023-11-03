@@ -1,0 +1,850 @@
+---
+title: "Sales Data Analysis Notebook"
+output: html_notebook
+---
+
+# Objectives:
+
+1. Sales Overview:
+  - Provide an overview of total revenue, total quantity sold, and average price per unit for the given period.
+
+2. Product Analysis:
+  - Identify the top-selling products based on total quantity sold and total revenue.
+  - Categorize products into different categories , analyze sales performance by category and product performance metrics
+
+3. Customer and Regional Analys:
+  - Identify the top-spending customers based on their total spending.
+  - Analyze customer distribution by city and identify the cities/country with the highest sales.
+
+4. Shipping/ Deal Size Analysis:
+  - Tracking shipping status over time, identifying patterns, and deriving insights. 
+
+
+# 1. Clearing environment , loading appropriate libraries and reading datasets
+
+```{r}
+rm(list=ls())
+```
+
+```{r message=FALSE}
+# Load required libraries
+library(dplyr)  # For data manipulation
+library(ggplot2)  # For data visualization
+library(readr)
+library(stringr)
+library(corrplot)
+library(tidyr)
+```
+
+
+```{r}
+# Read the dataset into a data frame
+sales_data <- read_csv("sales_data_sample.csv", col_names = TRUE)
+head(sales_data)
+```
+
+```{r}
+# Convert column headers to lowercase
+colnames(sales_data) <- tolower(colnames(sales_data))
+```
+
+
+# 2. Data Cleaning and Transformation: 
+
+  - Clean and transform the data if needed. Ensure data types are appropriate, and missing/duplicated values are handled.
+
+```{r}
+# Check the structure of the dataset
+#str(sales_data)
+glimpse(sales_data) 
+```
+
+# Exploratory Summary
+
+```{r}
+DataExplorer::plot_intro(sales_data , title = "sales_data Exploratory Summary") # check the types of variables
+```
+
+## Checking for null 
+
+```{r}
+# Manually calculate null counts for each column
+null_counts <- sapply(sales_data, function(x) sum(is.na(x)))
+
+# Create a data frame with columns and their respective null counts
+null_counts_df <- data.frame(Null_Count = null_counts)
+
+# Print the data frame with the list of columns and their null counts
+print(null_counts_df)
+```
+
+*Observation:* 
+  - join address 1 and 2 to cater for nulls in address 2
+  - state, territory and postalcode  is irrelevamt, remove from dataset
+  - Convert 'orderdate' to a Date object
+ 
+## joining adress 1 and 2 to remove null in address 2 as address , creating alias for contact name and change orderdate datatype
+
+```{r}
+# Join the two columns with a space in between
+sales_data$address <- paste(sales_data$addressline1, sales_data$addressline2, sep = " ")
+
+# Create an alias column with last name and the first character of the first name
+sales_data$contactalias <- paste0(sales_data$contactlastname, " ", str_sub(sales_data$contactfirstname, 1, 1), ".")
+
+# Convert 'orderdate' to a Date object
+sales_data$orderdate <- as.Date(sales_data$orderdate, format = "%m/%d/%Y %H:%M")
+
+# Extract the year and month from the order date
+sales_data <- sales_data %>%
+  mutate(year_month = format(orderdate, "%Y-%m"))
+
+```
+
+## removing irrelevant coluns
+
+```{r}
+sales_cleaned <- sales_data %>%
+  select(-orderlinenumber, -productcode, -phone, -addressline1 ,-addressline2,  -state,
+         -postalcode, -territory, -contactfirstname, -contactlastname)
+
+```
+
+
+## Recheck for null
+
+```{r}
+DataExplorer::plot_intro(sales_cleaned , title = "Exploratory Summary (sales_cleaned)") # check the types of variables
+```
+
+## Checking for Duplicate 
+
+```{r}
+# Count duplicate rows in the entire data frame
+total_duplicate_count <- sum(duplicated(sales_cleaned))
+total_duplicate_count
+
+# if duplicate exists remove
+# sales_cleaned <- sales_cleaned[!duplicated(sales_cleaned), ]
+```
+
+
+# Analysis
+
+## Basic statistical information 
+
+```{r warning=FALSE}
+skimr::skim(sales_cleaned)
+
+```
+
+**Observation**
+
+- sales Data spand from 2003 to 2005, with the majority being in 2003.
+- Manufacturer's suggested retail prices range from 33.00 to 214.00, with an average MSRP of approximately 100.72.
+- Sales figures range from 482.13 to 14082.80, with an average sales value of about 3553.89.
+- Product Prices vary between 26.88 and 100.00, with an average price of approximately 83.66.
+- The quantity ordered ranges from 6.00 to 97.00, with a mean of around 35.09.
+  
+## Correlation Analysis
+
+```{r}
+# Calculate the correlation matrix
+correlation_matrix <- sales_cleaned %>%
+  select_if(is.numeric) %>%  # Select only numeric columns
+  cor(method = "pearson")    # You can also use "spearman" for Spearman's correlation
+
+corrplot(correlation_matrix, method = "color")
+```
+**Observation**
+
+- There is a strong positive correlation (0.6706) between priceeach and msrp, indicating that the price at which an item is sold (priceeach) is strongly associated with the manufacturer's suggested retail price (msrp).
+- There is a moderate positive correlation (0.5514) between quantityordered and sales, indicating that higher quantities ordered are associated with higher sales.
+
+*These correlations provide insights into the relationships between the variables in your dataset and not necessarily causation.*
+
+
+## Data Analysis
+
+###  Sales Overview:
+  -To Provide an overview of total revenue, total quantity sold, and average price per unit for the given period.
+  
+
+```{r}
+#  total sales and monthly sales of each financial year?  Assuming  financial year starts in April and ends in March:
+sales_cleaned <- sales_cleaned %>%
+  mutate(
+    financial_year = ifelse(month_id >= 4, year_id, year_id - 1)
+  )
+
+head(sales_cleaned)
+```
+
+
+```{r}
+# Group sales data by the financial_year and month_id:
+
+monthly_financial_year_sales <- sales_cleaned %>%
+  group_by(financial_year = year_id, quarter= qtr_id, month_id) %>%
+  summarise(
+    total_sales = sum(sales), .groups = "drop"
+  )
+
+monthly_financial_year_sales$month <- month.abb[as.integer(monthly_financial_year_sales$month_id)]
+monthly_financial_year_sales$financial_year <- as.factor(monthly_financial_year_sales$financial_year)
+monthly_financial_year_sales$quarter <- as.factor(monthly_financial_year_sales$quarter)
+
+
+monthly_financial_year_sales
+
+```
+
+```{r Total Revenue}
+# total sales
+total_revenue <- sum(monthly_financial_year_sales$total_sales)
+```
+ 
+**Observation**
+
+- Total revenue generated across all years is roughly  $`r scales::label_number_si()(total_revenue)`
+
+  
+```{r}
+# Calculate total sales for each financial year
+yearly_totals <- monthly_financial_year_sales %>%
+  group_by(financial_year) %>%
+  summarize(total_sales = sum(total_sales))
+
+yearly_sales_plot <- ggplot(monthly_financial_year_sales, aes(x = financial_year, y = total_sales, fill = financial_year)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Yearly Sales",
+    x = "Financial Year",
+    y = "Total Sales"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # Use a predefined color palette
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +  # Apply a minimal theme
+  theme(legend.position = "none") +  # Hide the legend
+  geom_text(data = yearly_totals, aes(label = scales::label_number_si()(total_sales), vjust = 1.5), size = 4)
+
+# Display the plot
+yearly_sales_plot
+```
+**Observation**
+
+- In 2003, Sales were around 3.5 Million,
+- In 2004, Sales were around 4.7 Million and 
+- In 2005, Sales were around 1.8 k in just 5 months representing a progressive growth in the Sales
+
+```{r}
+# Calculate total sales for each financial year
+quarterly_totals <- monthly_financial_year_sales %>%
+  group_by(quarter) %>%
+  summarize(total_sales = sum(total_sales))
+
+quarterly_sales_plot <- ggplot(monthly_financial_year_sales, aes(x = quarter, y = total_sales, fill = quarter)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Quarterly Sales",
+    x = "Quarter",
+    y = "Total Sales"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # Use a predefined color palette
+  scale_y_continuous(labels = scales::dollar_format(scale = 0.01)) +  # Format as currency
+  theme_minimal() +  # Apply a minimal theme
+  theme(legend.position = "none") +  # Hide the legend
+  geom_text(data = quarterly_totals, aes(label = scales::label_number_si()(total_sales), vjust = 1.5), size = 4)
+
+# Display the plot
+quarterly_sales_plot
+```
+**Observation**
+
+- Overall Qtr 4 has the highest revenue inflow of 3.8M probably being festive period.
+
+```{r}
+# Create a line plot for monthly sales for each financial years
+
+monthly_financial_year_sales$month <- factor(monthly_financial_year_sales$month, levels = month.abb)
+
+monthly_sales_plot <- ggplot(monthly_financial_year_sales, aes(x = month, y = total_sales, color = financial_year, group = financial_year)) +
+  geom_line() +
+  labs(
+    title = "Monthly Sales for Each Financial Year",
+    x = "Month",
+    y = "Total Sales"
+  ) +
+  scale_color_brewer(palette = "Set2") +  # Use a predefined color palette
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal()
+
+
+
+monthly_sales_plot
+```
+**Observation**
+
+- In 2003, month of Januarry had the least amount of sales whereas month of November had best monthly sales
+- In 2004, month of April had the least amount of sales whereas month of November had best monthly sales 
+- In 2005, month of April had the least amount of sales whereas month of May  had best monthly sales
+
+*There is a pattern. During the summer season sales are high and just before the summer season sales the least*
+
+### Product Analysis:
+
+```{r Unique Products}
+# total unique products
+unique_products_count <- sales_cleaned %>%
+  distinct(productline) %>% n_distinct()
+```
+
+- Total unique products: `r unique_products_count`
+
+```{r Top Product}
+#What product sold the most? Why do you think it sold the most?
+
+productline_sales <- sales_cleaned %>%
+  group_by( productline) %>%
+  summarise(
+    total_sales = sum(sales),
+    average_sales = mean(sales),
+    avg_price = mean(priceeach),
+    median_price = median(priceeach),
+    quantity_ordered = sum(quantityordered),
+    avg_quantity_ordered = round(mean(quantityordered)),
+    msrp = median(msrp),  # MSRP = Manufacturer’s Suggested Retail Price
+    .groups = "drop"
+  )  %>%
+  arrange(desc(total_sales))
+
+
+ ggplot(productline_sales, aes(x = productline, y = total_sales, fill = productline)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Total Revenue Per Product",
+    x = "Product line",
+    y = "Total Revenue"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # Use a predefined color palette
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +  # Apply a minimal theme
+  theme(legend.position = "none") + # Hide the legend
+  geom_text(data = productline_sales, aes(label = scales::label_number_si()(total_sales), vjust = 1.5), size = 2)
+
+
+```
+
+- Product line that sold the most: `r productline_sales$productline[1]` with  `r scales::label_number_si()(productline_sales$total_quantity_sold[1])` quantities ordered and a  total sale of  `r scales::label_number_si()(productline_sales$total_sales[1])` at `r productline_sales$msrp[1]` average MSRP.
+
+
+```{r Performance Metric}
+# Create a grouped bar plot for key performance metrics
+key_metrics_plot <- ggplot(productline_sales, aes(x = productline)) +
+  geom_col(aes(y = log(average_sales), fill = "Average Sales")) +
+  geom_col(aes(y = log(msrp), fill = "Median MSRP")) +
+  geom_col(aes(y = log(median_price), fill = "Median Price")) +
+  geom_col(aes(y = log(avg_quantity_ordered), fill = "Average Quantity Ordered")) +
+  scale_fill_manual(values = c("Average Sales" = "turquoise3", "Median MSRP" = "blue", "Median Price" = "coral", "Average Quantity Ordered" = "purple")) +
+  labs(
+    title = "Log-Transformed Key Performance Metrics by Product Line",
+    x = "Product Line",
+    y = "Logarithmic Values"
+  ) +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  theme_minimal() +
+   theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+
+key_metrics_plot
+```
+**Observation**
+
+- Classic Cars, with the highest total sales and average sales, appear to be the best-performing product line in terms of revenue generation, suggesting strong customer demand for these product lines. 
+- Trains have the lowest sales performance and price metrics among the product lines
+- Classic Cars and Trucks and Buses have the highest average prices/ MSRP, indicating premium pricing for these products.
+- Trucks and Buses, despite having the highest median price/ average price/ has a lower total sales volume, indicating a higher price point for their products. 
+- The average quantity ordered is consistent across all product lines at 35, suggesting a standardized order quantity and may suggest consistent customer behavior..
+
+```{r product performance over the years, warning=FALSE}
+
+product_performance <- sales_cleaned %>%
+  group_by( year_id,qtr_id ,productline) %>%
+  summarise(
+    avg_quantity_ordered = round(mean(quantityordered)),
+    average_sales = mean(sales),
+    avg_price = mean(priceeach),
+    avg_msrp = mean(msrp),  # MSRP = Manufacturer’s Suggested Retail Price
+    .groups = "drop"
+  )  %>%
+  arrange(desc(average_sales))
+
+# Create a bar plot for the "Average Quantity Ordered" metric for all product lines over the years
+ggplot(product_performance, aes(x = year_id, y = avg_quantity_ordered, fill = productline)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Quantity Ordered Over the Years for Different Product Lines",
+    x = "Year",
+    y = "Average Quantity Ordered"
+  ) +
+  scale_fill_brewer(palette = "Paired") +  # Use a predefined color palette
+  theme_minimal()+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+
+# Create a plot for the "Average Sales" metric for all product lines over the years
+ggplot(product_performance, aes(x = year_id, y = average_sales, fill = productline)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Sales Over the Years for Different Product Lines",
+    x = "Year",
+    y = "Average Sales"
+  ) +
+  scale_fill_brewer(palette = "Set3") +  # Use a predefined color palette
+  theme_minimal()+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+
+# Create a plot for the "Average Price" metric for all product lines over the years
+ggplot(product_performance, aes(x = year_id, y = avg_price, fill = productline)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average Price Over the Years for Different Product Lines",
+    x = "Year",
+    y = "Average Price"
+  ) +
+  scale_fill_brewer(palette = "Paired") +  # Use a predefined color palette
+  theme_minimal()+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+
+# Create a plot for the "Average MSRP" metric for all product lines over the years
+ggplot(product_performance, aes(x = year_id, y = avg_msrp, fill = productline)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Average MSRP Over the Years for Different Product Lines",
+    x = "Year",
+    y = "Average MSRP"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # Use a predefined color palette
+  theme_minimal()+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+```
+
+**Insights**
+
+1. *Sales Growth:* Some product lines, such as "Classic Cars," "Motorcycles," and "Vintage Cars," have experienced consistent growth in the average quantity ordered and average sales from 2003 to 2005. This growth suggests that these product lines are popular and in demand.
+
+2. *Pricing Stability:* While there are fluctuations in average prices across product lines and years, the pricing changes are relatively modest. This stability in pricing may indicate that the company is maintaining competitive prices or that customers are not very price-sensitive for these products.
+
+3. *MSRP Variations:* The average Manufacturer's Suggested Retail Price (MSRP) varies across product lines. "Classic Cars" have the highest average MSRP, suggesting that they may be higher-end products. "Trains" have the lowest average MSRP, possibly indicating they are more budget-friendly items.
+
+4. *Yearly Trends: *Some product lines, like "Planes," have seen fluctuations in performance metrics over the years. In the case of "Planes," the average sales and average price increased from 2003 to 2004 but then decreased in 2005. This suggests a need for closer analysis of factors affecting these fluctuations.
+
+5. *Diverse Customer Preferences: *Different product lines attract different types of customers, as indicated by variations in sales, prices, and MSRP. Understanding these customer preferences can help tailor marketing and sales strategies.
+
+6. *Stable Product Lines:* Some product lines, such as "Ships," maintained relatively stable performance metrics over the observed years. This stability may be due to consistent demand for these products or effective management of inventory and pricing.
+
+*Product lines with declining performance metrics, such as "Trains," may require further analysis to identify the reasons behind the decline and explore opportunities for improvement.*
+
+
+```{r}
+# Calculate total sales for each product line in each quarter
+productline_quarter_sales <- sales_cleaned %>%
+  group_by(productline, qtr_id) %>%
+  summarise(total_sales = sum(sales), .groups = "drop")
+
+# Find the quarter with the highest total sales for each product line
+best_quarter <- productline_quarter_sales %>%
+  group_by(productline) %>%
+  slice_max(order_by = total_sales)%>%
+  arrange(desc(total_sales))
+
+# Print the results
+print(best_quarter)
+
+```
+**Observation**
+
+- Classic Cars performed exceptionally well in quarter 4 with total sales of approximately 1,527,449.57, while Vintage Cars,Trucks and Buses	, Motorcycles, and Planes also showed strong sales performance.
+- Trains had the lowest total sales, indicating a comparatively weaker quarter for that product line.
+- Overall, in the 4th quarter of each year all Products had maximum sales.The reason may be arrival of the Chirstmas holidays
+
+**Insight:**
+
+1. *Seasonal Variations:* There are significant quarterly variations in sales for different product lines. These variations might be due to seasonal factors, customer preferences, or other external influences.
+
+2. *Strong Performers:* Classic Cars consistently outperformed other product lines in terms of total sales across all quarters. This product line appears to have a strong and stable customer base.
+
+3. *Product Line Performance:* Vintage Cars and Trucks and Buses also demonstrated strong performance, with high total sales in quarter 4. This suggests that these product lines may have high demand during that period.
+
+4. *Low Performer:* Trains consistently had the lowest total sales among all the product lines. This could indicate that the Trains product line may require additional marketing or strategic changes to boost sales.
+
+*- data suggests that customers' preferences and buying patterns might vary across different product lines and quarters. Understanding these variations can help in making informed business decisions and marketing strategies.*
+
+*- Businesses might consider implementing seasonal marketing strategies and product promotions to leverage the quarterly variations and boost sales during specific periods.*
+
+*- Businesses should adjust their inventory and production planning based on these seasonal variations to meet the changing demand for different product lines*.
+
+
+###  Customer and Region Analysis:
+
+```{r unique customers}
+# total unique customers
+unique_customers_count <- sales_cleaned %>%
+  distinct(customername) %>% n_distinct()
+```
+
+- There are `r unique_customers_count` unique customers  in the dataset
+
+```{r Top Customers}
+# Group the data by customer_id and calculate the total spending for each customer
+customer_spending <- sales_cleaned %>%
+  group_by(customername, city) %>%
+  summarise(total_spending = sum(sales)) %>%
+  arrange(desc(total_spending))
+
+# Get the top 5 spending customers
+top_5_customers <- head(customer_spending, 5)
+
+ggplot(top_5_customers, aes(x = reorder(customername, -total_spending), y = total_spending, fill = customername)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Top 5 Customers by Total Spending",
+    x = "Customer Name",
+    y = "Total Spending"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # Use a predefined color palette
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "none") + # Hide the legend
+  geom_text(data = top_5_customers, aes(label = scales::label_number_si()(total_spending), vjust = 1.5), size = 2, color = "white")
+
+```
+**Observations:**
+
+- Clearly the the most valuable customer is `r top_5_customers$customername[1]` from the city of `r top_5_customers$city[1]`  with a total spend of `r scales::label_number_si()(top_5_customers$total_spending[1])`
+
+```{r Customer Growth Rate, warning=FALSE}
+# Calculate customer growth rate
+customer_growth <- sales_cleaned %>%
+  group_by(year_month) %>%
+  summarize(
+    customers = n_distinct(customername)
+  ) %>%
+  mutate(
+    growth_rate = (customers - lag(customers)) / lag(customers) * 100
+  )
+
+# Visualize customer growth rate
+ ggplot(customer_growth, aes(x = year_month, y = growth_rate, fill = growth_rate )) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Customer Growth Rate Over Time",
+    x = "Year-Month",
+    y = "Growth Rate (%)"
+  ) +
+  scale_fill_gradient(low = "red", high = "darkgreen", na.value = "transparent") +  # Adjust the color scale
+   theme_minimal() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+**Observation**
+
+- November 2004 had the highest number of customers with 30 customers and a growth rate of 130.77%, while
+- February 2005 had the lowest number of customers with 7 customers and a growth rate of -36.36% in the dataset.
+
+**Insights:**
+
+1. *Monthly Customer Growth:* Growth rates can be both positive and negative, indicating periods of customer acquisition and attrition.
+
+2. *Seasonal Trends:* Looking at the growth rates, there are fluctuations from one month to another. For example, there is a significant increase in customer count from October 2003 to November 2003, with a growth rate of 68.75%. However, in December 2003, there is a sharp decline in customer count, with a negative growth rate of -77.78%.
+
+3. *Yearly Patterns:* The data spans multiple years, and there are noticeable yearly patterns. For instance, between November 2003 and November 2004, there's substantial customer growth, with a peak growth rate of 130.77%. The year 2005 also starts with positive customer growth.
+
+4. *Negative Growth:* Several months exhibit negative growth rates, which may indicate a decline in customer numbers or customer churn during those periods.
+
+5. *Yearly Cycles:* There are yearly cycles where customer counts may peak during certain months, potentially aligning with holidays, promotions, or other factors influencing customer behavior.
+
+*Understanding these customer growth trends can help businesses identify opportunities for expansion and areas where they need to address customer retention and growth strategies.*
+
+#### Regional Analysis
+
+```{r}
+# total unique country and cities
+unique_country_count <- sales_cleaned %>%
+  distinct(country) %>% n_distinct()
+
+unique_city_count <- sales_cleaned %>%
+  distinct(city) %>% n_distinct()
+
+```
+
+- There are `r unique_country_count` unique countries with `r unique_city_count` unique cities
+
+```{r sales distribution by country}
+# customer and sales distribution by country
+country_sales <- sales_cleaned %>%
+  group_by(country) %>%  # Change 'City' to 'Country' if needed
+  summarize(totalSales = sum(sales),
+            totalcustomers= n_distinct(customername), .groups = "drop") 
+
+ggplot(country_sales, aes(x = reorder(country, -totalSales), y = totalSales, fill= country)) +
+  geom_bar(stat = "identity") +
+   geom_text(aes(label = totalcustomers), vjust = -0.5, size = 3) +  # Add total customers as labels
+   labs(
+    title = "Sales and Customers Distribution by Country",
+    x = "Country",
+    y = "Total Sales"
+  ) +
+  #scale_fill_brewer(palette = "viridis") +
+  scale_fill_manual(values = rainbow(length(unique(country_sales$country)))) + 
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**Observations:**
+
+- USA had the best sales in the world with highest number of customers (35) followed by Spain (5) and France (12).
+
+```{r sales distribution by city}
+# customer and sales distribution by city
+city_sales <- sales_cleaned %>%
+  group_by(city) %>%  # Change 'City' to 'Country' if needed
+  summarize(totalSales = sum(sales),
+            totalcustomers= n_distinct(customername), .groups = "drop") 
+
+# Identify top 10 cities with the highest sales
+top_cities <- city_sales %>%
+  arrange(desc(totalSales)) %>%
+  head(10)
+
+ggplot(top_cities, aes(x = reorder(city, -totalSales), y = totalSales, fill= city)) +
+  geom_bar(stat = "identity") +
+   geom_text(aes(label = totalcustomers), vjust = -0.5, size = 3) +  # Add total customers as labels
+   labs(
+    title = "Sales and Customers Distribution by City",
+    x = "City",
+    y = "Total Sales"
+  ) +
+  #scale_fill_brewer(palette = "viridis") +
+  scale_fill_manual(values = rainbow(length(unique(top_cities$city)))) + 
+  scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+**Observations:**
+
+- City of Madrid had the best sales in the world followed by San Rafael and New York City.
+
+```{r product region analysis}
+product_region_data <- sales_cleaned %>%
+  group_by(productline, country) %>%
+  summarize(total_sales = sum(sales),.groups = "drop") 
+
+# Create a bar plot to visualize the distribution of products in regions
+ggplot(product_region_data, aes(x = total_sales , y = reorder(country, -total_sales), fill = productline)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Product Distribution in Regions",
+    x = "Region",
+    y = "Total Sales Quantity"
+  ) +
+  scale_fill_brewer(palette = "Set1") +  # You can choose a color palette
+  scale_x_continuous(labels = scales::label_number_si()) +  # Format as currency
+  theme_minimal() +
+  theme(legend.position = "right", legend.title = element_blank())
+```
+
+**Observations/Insights**
+
+  1. Likewise, The USA is a significant market for all product lines, showing a high level of sales across the board.
+  2. France, Spain, and some European countries are also notable markets for various product lines.they showcases robust sales figures for Classic Cars and Vintage Cars and exhibit a significant customer base for these product lines, suggesting that tailored marketing campaigns and localized strategies can further capitalize on these market opportunities. 
+  3. Several countries have relatively lower total sales, such as Austria and Belgium for Classic Cars, or Ireland and the Philippines for Trains. These regions present untapped potential for market expansion and growth.
+  4. By recognizing these regional differences in product line performance, businesses can tailor their efforts to capitalize on specific market strengths and address weaknesses effectively. A targeted and region-specific strategy can lead to more successful market penetration and revenue generation."
+
+## Shipping Analys:
+
+```{r shippingstatus}
+
+shippingstatus_data <- sales_cleaned %>%
+  group_by(status) %>%
+  summarize(total_sales = sum(sales),
+            total_qty= sum(quantityordered), .groups = "drop") 
+
+ggplot(shippingstatus_data, aes(x = status, y = total_sales , fill = status)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = total_qty), vjust = -0.5, size = 3) +  # Add total order quantity
+  labs(
+    title = "Shipping Status / Quantity Orderded Distribution ",
+    x = "Shipping Status",
+    y = "Total Orders"
+  ) +
+   scale_fill_manual(values = rainbow(length(unique(sales_cleaned$status))))+
+   scale_y_continuous(labels = scales::label_number_si()) +  # Format as currency
+   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+ # facet_wrap(~shipping_speed)
+```
+
+**Observations:**
+
+- Overall, the "Shipped" status dominates in terms of both total sales and quantity, indicating the importance of efficiently managing and optimizing the shipping process.
+- The "On Hold" and "Resolved" statuses also contribute significantly to total sales, suggesting that understanding and addressing orders in these statuses can impact the bottom line positively.
+- Reduce the number of orders with "Cancelled" status. Even though they represent a smaller portion of sales, preventing cancellations can save costs and improve customer relationships.
+
+```{r shipping speed analysis}
+# Create a new variable to categorize shipping speed
+sales_cleaned <- sales_cleaned %>%
+  mutate(
+  shipping_speed = case_when(
+      status %in% c("Shipped", "Resolved") ~ "Fast",
+      status %in% c("Disputed", "In Process") ~ "Moderate",
+      status %in% c("Cancelled", "On Hold") ~ "Slow",
+      TRUE ~ "Other"
+    )
+  )
+
+# Calculate shipping time based on previous order within the same speed category
+sales_cleaned <- sales_cleaned %>%
+  arrange(customername, orderdate) %>%
+  group_by(customername, shipping_speed) %>%
+  mutate(
+    shipping_time = as.numeric(difftime(orderdate, lag(orderdate, default = first(orderdate)), units = "days"))
+  )
+
+# Shipping Speed Analysis
+shippingspeed_analysis <- sales_cleaned %>%
+  group_by(productline, status, shipping_speed) %>%
+  summarise(
+    total_orders = n(),
+    avg_sales = mean(sales),
+    avg_shipping_time = mean(shipping_time, na.rm = TRUE)
+    ,.groups = "drop" # Calculate average shipping time
+  )
+
+# Visualize the Shipping Speed Analysis per productline
+ggplot(shippingspeed_analysis, aes(x = productline, y = total_orders, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~shipping_speed) +  # Create facets for each metric
+  labs(
+    title = "Metrics by Product Line and Status",
+    x = "Product Line",
+    y = "Total Orders"
+  ) +
+  scale_fill_brewer(palette = "paired") +  # Adjust the color palette
+   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   theme(legend.title = element_blank(),
+        legend.position = "bottom",  # Place the legend below
+        legend.direction = "horizontal")  # Display the legend horizontally
+```
+
+**Observations:**
+
+- Fast shipping speeds are associated with "Resolved" and "Shipped" statuses, with "Shipped" having the highest quantity.
+- "Cancelled" orders have the slowest shipping speed and should be addressed to potentially increase revenue.
+- "Resolved" and "Shipped" statuses tend to have higher average sales, while "Disputed" and "On Hold" statuses have relatively lower average sales.
+- Notably, "Cancelled" orders are categorized as "Slow," and this status indicates that these orders were not shipped.
+- "Shipped" orders have a moderate average shipping time.
+-  Notably, all product lines have a fast shipping speed
+
+## Dealsize Analys:
+
+```{r Dealsize Analysis}
+# Dealsize Analysis
+dealsize_analysis <- sales_cleaned %>%
+  group_by(dealsize) %>%
+  summarise(
+    total_orders = n()
+  )
+
+ggplot(dealsize_analysis, aes(x = dealsize, y = total_orders)) +
+  geom_bar(stat = "identity", fill = "dodgerblue") +
+  labs(
+    title = "Dealsize Analysis",
+    x = "Dealsize",
+    y = "Total Orders"
+  )
+
+```
+**Observations:**
+
+- "Medium" and "Small" deals are the most popular in terms of order quantity, indicating that customers tend to prefer these deal sizes.
+- "Large" deals, while having a lower number of orders, may have a higher total value per order, as they are less frequent but potentially more substantial.
+- This information can be useful for tailoring marketing and sales strategies based on deal size preferences.
+
+```{r}
+# save cleaned df to  file
+write.csv(sales_cleaned, "sales_cleaned.csv", row.names = FALSE)
+
+```
+
+# Summary
+
+**Time Trends:**
+
+- There is a pattern .During the summer season sales are high and just before the summer season sales the least.
+- The dataset spans multiple years (2003 - 2005), and it can be observed that some product lines have seen consistent growth, while others have fluctuated.
+- The customer growth rate fluctuates from month to month, with some months showing negative growth and others showing substantial increases.
+- Different product lines perform differently in each quarter. Insights can be used to optimize stock and marketing strategies.
+- The month of "November" had the highest number of unique customers.
+- There are significant quarterly variations in sales for different product lines. These variations might be due to seasonal factors, customer preferences, or other external influences.
+
+**Product Line and Status Analysis:**
+
+- Classic Cars and Vintage Cars are consistently strong performers in various regions, with significant sales figures in the USA and parts of Europe.
+- Motorcycles also find success in both the USA and select European countries.
+- Planes have a noteworthy presence in the USA.
+- Ships exhibit strong sales in Spain.
+- Trains have a good market in Spain and the USA.
+- Trucks and Buses find favor in the USA.
+- Vintage Cars enjoy substantial sales in the USA.
+- Different product lines have varying shipping speeds and resolutions when it comes to order status.
+- Some product lines, such as "Ships," maintained relatively stable performance metrics over the observed years. This stability may be due to consistent demand for these products or effective management of inventory and pricing.
+- Product lines with declining performance metrics, such as "Trains," may require further analysis to identify the reasons behind the decline and explore opportunities for improvement.
+
+**Customer and Regional Insights:**
+
+- The dataset encompasses customers from various countries, reflecting a global customer base.
+- The USA stands out as the most significant market, with the highest total sales and a large customer count.
+- While the USA boasts the largest customer base and highest total sales, several European countries, such as France and Spain, have a substantial number of customers.
+- Euro Shopping Channel" in Madrid is the top-spending customer with a total spending of 912,294.1.
+- The top 5 spending customers are "Euro Shopping Channel," "Mini Gifts Distributors Ltd.," "Australian Collectors, Co.," "Muscle Machine Inc," and "La Rochelle Gifts."
+- Madrid, Spain" has the highest city sales, followed by "San Rafael, USA," and "Melbourne, Australia."
+
+**Deal Size and Shipping Status Analysis :**
+
+- Customers tend to prefer "Medium" and "Small" deals over "Large" deals, as indicated by the higher number of orders for these deal sizes.
+- Order statuses vary, with "Shipped" being the most common, while other statuses like "Cancelled" and "Disputed" also exist but with minor sales.
+
+*In summary, this dataset offers valuable insights into customer behavior, product performance across regions, and trends over time. These insights can be leveraged to make informed decisions, develop effective marketing strategies, and identify growth opportunities in various markets.*
+
+**Understanding the unique characteristics of each product line and region is key to optimizing sales and achieving business goals.**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
